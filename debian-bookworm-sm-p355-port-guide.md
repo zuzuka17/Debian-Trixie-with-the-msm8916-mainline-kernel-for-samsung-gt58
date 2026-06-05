@@ -1,18 +1,14 @@
-# Debian Bookworm on the Samsung SM-P355 / Galaxy Tab A 8.0 (MSM8916)
+# Debian Trixie on the Samsung SM-P355 / Galaxy Tab A 8.0 (MSM8916)
 ### A Complete Step-by-Step Guide
 
 ---
 
 ## What You Will End Up With
 
-Debian bookworm (arm64) on the **Samsung Galaxy Tab A 8.0 (2015)**, model **SM-P355**, codename **gt58**, powered by the **Qualcomm Snapdragon 410 (MSM8916)** SoC.
-
-The finished system:
-
 ```
-OS:      Debian GNU/Linux 12 (bookworm) aarch64
+OS:      Debian GNU/Linux 13 (trixie) aarch64
 Host:    Samsung Galaxy Tab A 8.0 (2015)
-Kernel:  Linux 6.12.1-msm8916+
+Kernel:  Linux 7.1-msm8916+
 GPU:     Freedreno FD307 (hardware accelerated)
 CPU:     msm8916 (4) @ 1.00 GHz
 RAM:     1.83 GiB
@@ -22,60 +18,26 @@ Audio:   samsung-a2015 ALSA card
 Display: DSI-1 768x1024 @ 60 Hz
 ```
 
-Everything from the kernel down — lk2nd, msm-firmware-loader, rmtfs, WiFi, audio, GPU — is identical to the Arch guide. Only the rootfs setup and package management change.
-
 **Development machine:** Lenovo ThinkPad T470 running Arch Linux, cross-compiling as user `zuzu`.
 
 ---
 
 ## Prerequisites
 
-### Hardware
-- Samsung Galaxy Tab A 8.0 / SM-P355 (gt58)
-- MicroSD card, 32 GB or larger
-- USB cable (Micro-USB)
-- A PC running Linux
-
 ### Software on your PC
 
-**On Arch:**
 ```bash
 sudo pacman -S debootstrap qemu-user-static binfmt-support \
   base-devel git android-tools wget aarch64-linux-gnu-gcc
 ```
 
-**On Debian/Ubuntu:**
-```bash
-sudo apt install debootstrap qemu-user-static binfmt-support \
-  build-essential git android-tools-fastboot wget \
-  gcc-aarch64-linux-gnu
-```
-
 ---
 
-## Part 1 — The Boot Chain
+## Part 1 — Flash lk2nd
 
-Identical to the Arch guide. Nothing changes here.
+Skip if already done.
 
-```
-Samsung bootloader → lk2nd → mainline Linux kernel → Debian bookworm
-```
-
-The Android firmware partitions on the internal eMMC are left untouched. `msm-firmware-loader` reads from them at boot.
-
----
-
-## Part 2 — Flashing lk2nd
-
-If lk2nd is already flashed from your Arch install, skip this entirely.
-
-If starting fresh, download the latest MSM8916 image from:
-
-```
-https://github.com/msm8916-mainline/lk2nd/releases
-```
-
-Boot the tablet into stock fastboot mode (hold **Volume Down + Power** while plugging in USB), then:
+Download the latest MSM8916 image from `https://github.com/msm8916-mainline/lk2nd/releases`, boot the tablet into stock fastboot (hold **Volume Down + Power** while plugging in USB), then:
 
 ```bash
 fastboot flash boot lk2nd-msm8916.img
@@ -86,22 +48,18 @@ From now on **Volume Down + Power** enters lk2nd's fastboot mode.
 
 ---
 
-## Part 3 — Preparing the SD Card
+## Part 2 — Prepare the SD Card
 
-Identical to the Arch guide. Identify your SD card with `lsblk`.
+Identify your card with `lsblk` — make sure you have the right device before proceeding.
 
 ```bash
 sudo fdisk /dev/sdX
 # Partition 1: ~512 MB  → /boot
 # Partition 2: rest     → /
-```
 
-```bash
 sudo mkfs.ext4 /dev/sdX1
 sudo mkfs.ext4 /dev/sdX2
-```
 
-```bash
 sudo mkdir -p /mnt/boot /mnt/root
 sudo mount /dev/sdX1 /mnt/boot
 sudo mount /dev/sdX2 /mnt/root
@@ -109,36 +67,29 @@ sudo mount /dev/sdX2 /mnt/root
 
 ---
 
-## Part 4 — Installing Debian bookworm
-
-### Bootstrap the rootfs
-
-`debootstrap` builds a minimal Debian system directly into the SD card root partition. Since your PC is x86_64, it needs QEMU to run arm64 binaries in the chroot.
+## Part 3 — Bootstrap Debian Trixie
 
 ```bash
 sudo debootstrap \
   --arch=arm64 \
   --foreign \
-  bookworm \
+  trixie \
   /mnt/root \
-  https://deb.debian.org/debian
+  http://deb.debian.org/debian
 ```
 
-The `--foreign` flag stages the bootstrap without executing anything — execution happens inside the chroot via QEMU.
+Use `http` not `https` here — `ca-certificates` isn't installed yet inside the chroot so https will fail. You switch to https after the first `apt install`.
 
-### Copy QEMU into the chroot
+Copy QEMU and complete the second stage:
 
 ```bash
 sudo cp /usr/bin/qemu-aarch64-static /mnt/root/usr/bin/
-```
-
-### Complete the bootstrap
-
-```bash
 sudo chroot /mnt/root /debootstrap/debootstrap --second-stage
 ```
 
-This takes a few minutes.
+---
+
+## Part 4 — Configure the System Inside the Chroot
 
 ### Enter the chroot
 
@@ -150,61 +101,77 @@ sudo mount --bind /dev/pts  /mnt/root/dev/pts
 sudo chroot /mnt/root /bin/bash
 ```
 
-### Configure the base system
+### Set time, hostname, hosts
+
+The chroot has no clock. Set the date manually so apt doesn't complain about certificate validity:
 
 ```bash
-# Hostname
+date -s "2026-06-05 14:00:00"   # adjust to today's date
+
 echo "gt58" > /etc/hostname
 
-# Hosts file
 cat > /etc/hosts <<EOF
 127.0.0.1   localhost
 127.0.1.1   gt58
 ::1         localhost ip6-localhost ip6-loopback
 EOF
-
-# Timezone
-ln -sf /usr/share/zoneinfo/Europe/Budapest /etc/localtime
-# Adjust the above to your timezone
-
-# Locale
-apt install -y locales
-dpkg-reconfigure locales
-# Select en_US.UTF-8 or your preferred locale
-
-# Root password
-passwd root
 ```
 
-### Configure apt sources
+### Bootstrap apt — http first, then switch to https
 
 ```bash
+# Sources with http first (no ca-certificates yet)
 cat > /etc/apt/sources.list <<EOF
-deb https://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
-deb https://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
-deb https://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
 EOF
 
 apt update
+apt install -y ca-certificates
+
+# Switch to https now that ca-certificates is installed
+cat > /etc/apt/sources.list <<EOF
+deb https://deb.debian.org/debian trixie main contrib non-free non-free-firmware
+deb https://deb.debian.org/debian trixie-updates main contrib non-free non-free-firmware
+deb https://security.debian.org/debian-security trixie-security main contrib non-free non-free-firmware
+EOF
+
+apt update
+apt full-upgrade -y
 ```
 
-### Install essential packages
+### Set timezone and locale
+
+```bash
+ln -sf /usr/share/zoneinfo/Europe/Budapest /etc/localtime
+# Adjust to your timezone
+
+apt install -y locales
+/usr/sbin/dpkg-reconfigure locales
+# Select en_US.UTF-8 or your preferred locale
+```
+
+### Set root password
+
+```bash
+passwd root
+```
+
+### Install all packages
 
 ```bash
 apt install -y \
-  systemd systemd-sysv udev dbus \
-  sudo \
-  networkmanager \
-  openssh-server \
+  systemd systemd-sysv systemd-timesyncd udev dbus sudo \
+  network-manager openssh-server \
   wget curl git nano \
-  linux-firmware \
-  alsa-utils alsa-ucm-conf \
+  firmware-linux alsa-utils alsa-ucm-conf \
   xorg xserver-xorg-input-libinput \
-  lightdm \
-  icewm \
-  onboard \
+  xserver-xorg-video-fbdev xserver-xorg-video-modesetting \
+  lightdm lightdm-gtk-greeter lightdm-gtk-greeter-settings \
+  icewm onboard \
   mesa-vulkan-drivers libgl1-mesa-dri \
-  xrandr xinput \
+  x11-xserver-utils xinput \
   fastfetch \
   build-essential meson ninja-build pkg-config \
   libglib2.0-dev libudev-dev libqrtr-glib-dev
@@ -214,15 +181,10 @@ apt install -y \
 
 ```bash
 adduser zuzu
-# Follow the prompts, set a password
-
-# Add to necessary groups
 usermod -aG sudo,video,input,audio,netdev zuzu
 ```
 
 ### Configure LightDM
-
-LightDM is the display manager. Configure it to use onboard as the on-screen keyboard and optionally autologin:
 
 ```bash
 cat > /etc/lightdm/lightdm.conf <<EOF
@@ -231,20 +193,19 @@ greeter-session=lightdm-gtk-greeter
 autologin-user=zuzu
 autologin-user-timeout=0
 EOF
-```
 
-Install the GTK greeter:
-
-```bash
-apt install -y lightdm-gtk-greeter lightdm-gtk-greeter-settings
-```
-
-Configure the greeter to show the on-screen keyboard:
-
-```bash
 cat > /etc/lightdm/lightdm-gtk-greeter.conf <<EOF
 [greeter]
 keyboard=onboard
+EOF
+```
+
+### fstab
+
+```bash
+cat > /etc/fstab <<EOF
+/dev/mmcblk1p2  /       ext4    defaults,noatime  0 1
+/dev/mmcblk1p1  /boot   ext4    defaults          0 2
 EOF
 ```
 
@@ -254,6 +215,7 @@ EOF
 systemctl enable NetworkManager
 systemctl enable lightdm
 systemctl enable ssh
+systemctl enable systemd-timesyncd
 ```
 
 ### Exit the chroot
@@ -265,108 +227,265 @@ sudo umount /mnt/root/dev/pts /mnt/root/dev /mnt/root/proc /mnt/root/sys
 
 ---
 
-## Part 5 — Building the Mainline Kernel
+## Part 5 — msm-firmware-loader
 
-Identical to the Arch guide. Use the msm8916-mainline kernel at `v6.12.1-msm8916` with the pmaports config.
+This reads the proprietary Qualcomm firmware blobs directly from the original Android partitions on the tablet's internal eMMC at boot, and sets them as the kernel firmware search path. Nothing is extracted manually — the Android partitions are left untouched and mounted read-only.
 
-```bash
-git clone https://github.com/msm8916-mainline/linux.git \
-  --depth=1 --branch v6.12.1-msm8916 ~/linux
-cd ~/linux
-
-git clone https://gitlab.postmarketos.org/postmarketOS/pmaports.git ~/pmaports
-
-cp ~/pmaports/device/testing/linux-postmarketos-qcom-msm8916/config-postmarketos-qcom-msm8916.aarch64 .config
-
-export ARCH=arm64
-export CROSS_COMPILE=aarch64-linux-gnu-
-make olddefconfig
-make -j$(nproc) Image.gz dtbs modules
-```
-
-### Install modules to the SD card
+### Create the script
 
 ```bash
-sudo mount /dev/sdX2 /mnt/root
-sudo make INSTALL_MOD_PATH=/mnt/root modules_install
+sudo nano /mnt/root/usr/sbin/msm-firmware-loader.sh
 ```
 
-### Copy kernel and DTB
+Paste the following exactly:
+
+```sh
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+#
+# This script is responsible for loading firmware blobs from firmware
+# partitions on qcom devices. It will make a dir in tmp, mount all of the
+# interesting partitions there and then symlink blobs to a single dir that can
+# be then provided to the kernel. (At this time only single additional
+# directory can be provided)
+#
+# This script attempts to load everything at runtime and be as generic
+# as possible between the target devices: It should allow a single rootfs
+# to be used on multiple different devices as long as all the blobs
+# are present on dedicated partitions.
+# (Usually the case, Samsung devices ship all blobs, other devices may miss
+# venus but that still allows for WiFi and modem to work)
+
+# Get the slot suffix for A/B devices.
+# If qbootctl is available query the active slot using that, otherwise rely on
+# the kernel cmdline to contain the slot suffix.
+# On non-A/B devices the return value will be empty.
+# https://source.android.com/docs/core/architecture/bootloader/updating#slots
+ab_get_slot() {
+	if command -v qbootctl > /dev/null; then
+		ab_slot_suffix=$(qbootctl -a | grep -o 'Active slot: _[ab]' | cut -d ":" -f2 | xargs) || :
+	else
+		ab_slot_suffix=$(grep -o 'androidboot\.slot_suffix=..' /proc/cmdline |  cut -d "=" -f2) || :
+	fi
+	echo "$ab_slot_suffix"
+}
+
+# Configurations:
+
+# List of partitions to be mounted and inspected for blobs.
+FW_PARTITIONS="
+	apnhlos
+	bluetooth$(ab_get_slot)
+	dsp$(ab_get_slot)
+	modem$(ab_get_slot)
+	persist
+	vendor$(ab_get_slot)
+"
+
+# List of partitions to mount dynamic partitions from.
+SUPER_PARTITIONS="
+	super
+	system
+"
+
+# Base directory to be used to unfold the partitions into.
+BASEDIR="/run/msm-firmware-loader"
+
+# Preparations:
+# This script is intended to run before udev. This means that writeable fs
+# may not be available yet. Since this script only creates symlinks, it
+# uses tmpfs to work around the early-run limitations as well as to reduce
+# disk wear slightly.
+mount -o mode=755,nodev,noexec,nosuid -t tmpfs none "$BASEDIR"
+
+mkdir -p "$BASEDIR/mnt"
+mkdir -p "$BASEDIR/target"
+
+# Scanning and mounting partitions we're interested in:
+
+# Modern android devices use dynamic partitions for the system.
+# To gather firmware from such partitions, search for a "super"
+# or "system" partition, and if one is present, map it and try
+# to locate firmware partitions of interest inside.
+if command -v make-dynpart-mappings > /dev/null
+then
+	for part in /sys/block/mmcblk*/mmcblk*p* /sys/block/sd*/sd*
+	do
+		if ! [ -e "$part" ]; then continue; fi;
+
+		DEVNAME="$(grep DEVNAME "$part"/uevent | sed 's/DEVNAME=//g')"
+		PARTNAME="$(grep PARTNAME "$part"/uevent | sed 's/PARTNAME=//g')"
+
+		if [ -z "${SUPER_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ]
+		then
+			if ! make-dynpart-mappings "/dev/$DEVNAME"; then continue; fi;
+
+			for dynpart in /dev/mapper/*
+			do
+				PARTNAME="$(basename "$dynpart")"
+				if [ -z "${FW_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ]
+				then
+					mkdir -p "$BASEDIR/mnt/$PARTNAME"
+					mount -o ro,nodev,noexec,nosuid \
+						"$dynpart" "$BASEDIR/mnt/$PARTNAME"
+				fi
+			done
+
+			break
+		fi
+	done
+fi
+
+# /dev/disk/by-partlabel symlinks don't exist yet, scan sysfs for names instead
+for part in /sys/block/mmcblk*/mmcblk*p* /sys/block/sd*/sd*
+do
+	if ! [ -e "$part" ]; then continue; fi;
+
+	DEVNAME="$(grep DEVNAME "$part"/uevent | sed 's/DEVNAME=//g')"
+	PARTNAME="$(grep PARTNAME "$part"/uevent | sed 's/PARTNAME=//g')"
+
+	if [ -z "${FW_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ] && [ ! -d "$BASEDIR/mnt/$PARTNAME" ]
+	then
+		mkdir -p "$BASEDIR/mnt/$PARTNAME"
+		mount -o ro,nodev,noexec,nosuid \
+			"/dev/$DEVNAME" "$BASEDIR/mnt/$PARTNAME"
+	fi
+done
+
+# Linking blobs from all partitions:
+
+EXTRA_PATH="$(cat /sys/module/firmware_class/parameters/path)"
+
+if [ -d "$EXTRA_PATH" ]
+then
+	for blob in "$EXTRA_PATH"/*
+	do
+		if ! [ -e "$blob" ]; then break; fi
+		ln -s "$blob" "$BASEDIR/target/$(basename "$blob")"
+	done
+fi
+
+for blob in "$BASEDIR"/mnt/*/image/* "$BASEDIR"/mnt/*/firmware/*
+do
+	if ! [ -e "$blob" ]; then continue; fi;
+
+	DIR="$(dirname "$blob")"
+	BLOBBASE="${blob##*/}"
+	BLOBBASE="${BLOBBASE%.*}"
+
+	for prefix in "$BASEDIR/target/$BLOBBASE."*
+	do
+		if [ -e "$prefix" ]; then continue 2; fi
+	done
+
+	for part in "$DIR"/"$BLOBBASE"*
+	do
+		if [ -f "$part" ]
+		then
+			ln -s "$part" "$BASEDIR/target/$(basename "$part")"
+		fi
+	done
+done
+
+# Check for sns.reg in persist partition
+if [ -f "$BASEDIR"/mnt/persist/sensors/sns.reg ]
+then
+	mkdir -p "$BASEDIR/target/qcom/sensors"
+	ln -s "$BASEDIR"/mnt/persist/sensors/sns.reg "$BASEDIR"/target/qcom/sensors/sns.reg
+fi
+
+# Check WCNSS_qcom_wlan_nv.bin in persist partition
+if [ -f "$BASEDIR"/mnt/persist/WCNSS_qcom_wlan_nv.bin ]
+then
+	ln -s "$BASEDIR"/mnt/persist/WCNSS_qcom_wlan_nv.bin "$BASEDIR"/target/WCNSS_qcom_wlan_nv.bin
+fi
+
+# venus fixup
+if [ -f "$BASEDIR/target/venus.mdt" ] && ! [ -d "$BASEDIR/target/qcom/venus-x" ]
+then
+	mkdir -p "$BASEDIR/target/qcom/venus-x"
+	for part in "$BASEDIR"/target/venus.*
+	do
+		ln -s "$part" "$BASEDIR/target/qcom/venus-x/$(basename "$part")"
+	done
+fi
+
+VENUS_DIRS="
+	venus-1.8
+	venus-3.0
+	venus-4.2
+	venus-4.4
+	venus-5.2
+	venus-5.4
+	vpu-1.0
+	vpu-2.0
+"
+
+for vdir in $VENUS_DIRS
+do
+	if ! [ -d "$BASEDIR/target/qcom/$vdir" ] && [ -f "$BASEDIR/target/venus.mdt" ]
+	then
+		ln -s "$BASEDIR/target/qcom/venus-x" \
+			"$BASEDIR/target/qcom/$vdir"
+	fi
+done
+
+# WCNSS_qcom_wlan_nv.bin relocation
+if [ -h "$BASEDIR"/target/WCNSS_qcom_wlan_nv.bin ]
+then
+	if ! [ -f "$BASEDIR"/target/wlan/prima/WCNSS_qcom_wlan_nv.bin ]
+	then
+		mkdir -p "$BASEDIR"/target/wlan/prima
+		ln -s "$BASEDIR"/target/WCNSS_qcom_wlan_nv.bin "$BASEDIR"/target/wlan/prima/
+	fi
+fi
+
+# Bluetooth firmware (ath10k wcn3990 devices)
+if [ -d "$BASEDIR/mnt/bluetooth$(ab_get_slot)" ]
+then
+	mkdir -p "$BASEDIR"/target/qca
+	for btblob in "$BASEDIR/mnt/bluetooth$(ab_get_slot)/image"/*
+	do
+		ln -s "$btblob" "$BASEDIR"/target/qca/
+	done
+fi
+
+# Symlink .mdt → .mbn so the kernel can autodetect the type
+find "$BASEDIR"/target/ \
+	-name '*.mdt' \
+	-exec sh -c 'ln -s $0 ${0%.mdt}.mbn' {} \;
+
+# Device-model-specific firmware prefix
+FIRMWARE_PREFIX=$(find /sys/firmware/devicetree -name "firmware-name" | head -n1 | xargs cat | xargs dirname)
+
+if [ -n "$FIRMWARE_PREFIX" ]
+then
+	mkdir -p "$BASEDIR/target/$(dirname "$FIRMWARE_PREFIX")"
+	ln -s "$BASEDIR/target" "$BASEDIR/target/$FIRMWARE_PREFIX"
+fi
+
+# Set the firmware search path
+printf "%s" "$BASEDIR/target" > /sys/module/firmware_class/parameters/path
+```
+
+Make it executable:
 
 ```bash
-sudo mount /dev/sdX1 /mnt/boot
-sudo cp arch/arm64/boot/Image.gz /mnt/boot/
-sudo cp arch/arm64/boot/dts/qcom/msm8916-samsung-gt58.dtb /mnt/boot/
+sudo chmod +x /mnt/root/usr/sbin/msm-firmware-loader.sh
 ```
 
----
-
-## Part 6 — Boot Configuration
-
-Identical to the Arch guide.
+### Create the run directory
 
 ```bash
-sudo mkdir -p /mnt/boot/extlinux
-sudo nano /mnt/boot/extlinux/extlinux.conf
+sudo mkdir -p /mnt/root/run/msm-firmware-loader
+echo "d /run/msm-firmware-loader 0755 root root -" | \
+  sudo tee /mnt/root/etc/tmpfiles.d/msm-firmware-loader.conf
 ```
 
-```
-LABEL Debian bookworm
-  LINUX /Image.gz
-  FDT /msm8916-samsung-gt58.dtb
-  APPEND root=/dev/mmcblk1p2 rootwait rw rootfstype=ext4 console=tty0 loglevel=7
-```
-
-### Build boot.img
+### Create the systemd service
 
 ```bash
-cd ~/linux
-
-cat arch/arm64/boot/Image.gz \
-    arch/arm64/boot/dts/qcom/msm8916-samsung-gt58.dtb > Image-dtb.gz
-
-mkbootimg \
-  --kernel Image-dtb.gz \
-  --cmdline "root=/dev/mmcblk1p2 rootwait rw rootfstype=ext4 console=tty0 loglevel=7" \
-  --base 0x80000000 \
-  --pagesize 2048 \
-  --os_version 11.0 \
-  --os_patch_level 2025-01 \
-  -o boot.img
-```
-
-### Test and flash
-
-```bash
-fastboot boot boot.img      # test first
-fastboot flash boot boot.img  # flash once confirmed
-```
-
----
-
-## Part 7 — Firmware Loading (msm-firmware-loader)
-
-Identical to the Arch guide. The script is pure shell and runs fine on Debian.
-
-Create the script:
-
-```bash
-sudo nano /usr/sbin/msm-firmware-loader.sh
-```
-
-Paste the full script (same as Arch guide, Part 7). Then:
-
-```bash
-sudo chmod +x /usr/sbin/msm-firmware-loader.sh
-```
-
-Create the service:
-
-```bash
-sudo nano /usr/lib/systemd/system/msm-firmware-loader.service
-```
-
-```ini
+sudo tee /mnt/root/usr/lib/systemd/system/msm-firmware-loader.service <<EOF
 [Unit]
 Description=Load firmware that is located on dedicated partitions of qcom devices
 Before=systemd-udevd.service
@@ -380,36 +499,71 @@ RemainAfterExit=yes
 
 [Install]
 WantedBy=sysinit.target
+EOF
 ```
 
-Create the run directory:
+Enable it via chroot:
 
 ```bash
-sudo mkdir -p /run/msm-firmware-loader
-echo "d /run/msm-firmware-loader 0755 root root -" | \
-  sudo tee /etc/tmpfiles.d/msm-firmware-loader.conf
-
-sudo systemctl enable msm-firmware-loader.service
+sudo chroot /mnt/root systemctl enable msm-firmware-loader.service
 ```
 
 ---
 
-## Part 8 — USB RNDIS Gadget (SSH During Initial Setup)
+## Part 6 — USB RNDIS Gadget
 
-Identical to the Arch guide. Enable only when needed before WiFi is configured.
+For SSH access during initial setup before WiFi is working. Disable once WiFi is configured.
 
-```bash
-sudo systemctl enable usb-gadget.service
-sudo systemctl start usb-gadget.service
-```
-
-Configure `usb0` via systemd-networkd:
+### Create the gadget script
 
 ```bash
-sudo nano /etc/systemd/network/80-usb0.network
+sudo tee /mnt/root/usr/bin/usb-gadget.sh <<'EOF'
+#!/bin/sh
+modprobe libcomposite
+cd /sys/kernel/config/usb_gadget/ || exit 1
+mkdir -p msm8916
+cd msm8916
+echo 0x04E8 > idVendor
+echo 0x685D > idProduct
+mkdir -p strings/0x409
+echo "Samsung"      > strings/0x409/manufacturer
+echo "Galaxy Tab A" > strings/0x409/product
+echo "0123456789"   > strings/0x409/serialnumber
+mkdir -p functions/rndis.usb0
+mkdir -p configs/c.1/strings/0x409
+echo "RNDIS" > configs/c.1/strings/0x409/configuration
+ln -sf functions/rndis.usb0 configs/c.1/
+ls /sys/class/udc | head -1 > UDC
+EOF
+
+sudo chmod +x /mnt/root/usr/bin/usb-gadget.sh
 ```
 
-```ini
+### Create the service
+
+```bash
+sudo tee /mnt/root/usr/lib/systemd/system/usb-gadget.service <<EOF
+[Unit]
+Description=USB RNDIS Gadget
+After=msm-firmware-loader.service
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/usb-gadget.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+### Configure usb0 networking
+
+```bash
+sudo mkdir -p /mnt/root/etc/systemd/network
+
+sudo tee /mnt/root/etc/systemd/network/80-usb0.network <<EOF
 [Match]
 Name=usb0
 
@@ -420,13 +574,17 @@ DHCPServer=yes
 [DHCPServer]
 PoolOffset=10
 PoolSize=20
+EOF
 ```
+
+Enable via chroot:
 
 ```bash
-sudo systemctl enable systemd-networkd
+sudo chroot /mnt/root systemctl enable usb-gadget.service
+sudo chroot /mnt/root systemctl enable systemd-networkd
 ```
 
-From your PC:
+### Connect from your PC
 
 ```bash
 sudo ip addr add 192.168.7.2/24 dev usb0
@@ -434,7 +592,7 @@ sudo ip link set usb0 up
 ssh zuzu@192.168.7.1
 ```
 
-Share internet to the tablet:
+### Share internet to the tablet over USB
 
 ```bash
 # On your PC
@@ -452,9 +610,81 @@ echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
 
 ---
 
+## Part 7 — Build the Kernel
+
+Use the msm8916-mainline kernel at `wip/msm8916/7.1-rc6` (or the latest 7.1 tag) with the pmaports config.
+
+```bash
+git clone https://github.com/msm8916-mainline/linux.git \
+  --depth=1 --branch wip/msm8916/7.1-rc6 ~/linux
+cd ~/linux
+
+# Get the pmaports config if you haven't already
+git clone https://gitlab.postmarketos.org/postmarketOS/pmaports.git ~/pmaports
+
+cp ~/pmaports/device/testing/linux-postmarketos-qcom-msm8916/config-postmarketos-qcom-msm8916.aarch64 .config
+
+export ARCH=arm64
+export CROSS_COMPILE=aarch64-linux-gnu-
+make olddefconfig
+make -j$(nproc) Image.gz dtbs modules
+```
+
+### Install modules
+
+```bash
+sudo mount /dev/sdX2 /mnt/root
+sudo make INSTALL_MOD_PATH=/mnt/root modules_install
+```
+
+### Copy kernel and DTB
+
+```bash
+sudo mount /dev/sdX1 /mnt/boot
+sudo cp arch/arm64/boot/Image.gz /mnt/boot/
+sudo cp arch/arm64/boot/dts/qcom/msm8916-samsung-gt58.dtb /mnt/boot/
+```
+
+---
+
+## Part 8 — Boot Configuration
+
+```bash
+sudo mkdir -p /mnt/boot/extlinux
+sudo tee /mnt/boot/extlinux/extlinux.conf <<EOF
+LABEL Debian Trixie
+  LINUX /Image.gz
+  FDT /msm8916-samsung-gt58.dtb
+  APPEND root=/dev/mmcblk1p2 rootwait rw rootfstype=ext4 console=tty0 loglevel=7
+EOF
+```
+
+### Build and flash boot.img
+
+```bash
+cd ~/linux
+
+cat arch/arm64/boot/Image.gz \
+    arch/arm64/boot/dts/qcom/msm8916-samsung-gt58.dtb > Image-dtb.gz
+
+mkbootimg \
+  --kernel Image-dtb.gz \
+  --cmdline "root=/dev/mmcblk1p2 rootwait rw rootfstype=ext4 console=tty0 loglevel=7" \
+  --base 0x80000000 \
+  --pagesize 2048 \
+  --os_version 11.0 \
+  --os_patch_level 2025-01 \
+  -o boot.img
+
+fastboot boot boot.img        # test first
+fastboot flash boot boot.img  # flash once confirmed
+```
+
+---
+
 ## Part 9 — WiFi
 
-Identical to the Arch guide. NetworkManager manages `wlan0` automatically once the WCNSS firmware is loaded.
+NetworkManager manages `wlan0` automatically once the WCNSS firmware is loaded by `msm-firmware-loader`. On first boot connect via:
 
 ```bash
 nmtui
@@ -462,7 +692,7 @@ nmtui
 nmcli device wifi connect "YourSSID" password "YourPassword"
 ```
 
-Disable the USB gadget once WiFi works:
+Once WiFi works, disable the USB gadget:
 
 ```bash
 sudo systemctl disable usb-gadget.service
@@ -472,39 +702,28 @@ sudo systemctl disable usb-gadget.service
 
 ## Part 10 — rmtfs
 
-`rmtfs` is not packaged in Debian. Build it from source on the tablet (requires internet via USB tethering or WiFi first):
+Not packaged in Debian. Build from source on the tablet once you have internet (WiFi or USB tethering):
 
 ```bash
-# Install build dependencies (already installed if you followed Part 4)
-sudo apt install -y meson ninja-build pkg-config \
-  libglib2.0-dev libudev-dev libqrtr-glib-dev
-
 git clone https://github.com/andersson/rmtfs.git
 cd rmtfs
 meson setup build
 ninja -C build
 sudo ninja -C build install
-```
-
-Enable the service:
-
-```bash
 sudo systemctl enable rmtfs
+sudo systemctl start rmtfs
 ```
 
 ---
 
 ## Part 11 — Audio
 
-Identical to the Arch guide. The audio stack is hardware-level and distro-independent.
+The audio stack is identical to the Arch guide — hardware-level, distro-independent.
 
-### Load audio modules at boot
+### Load modules at boot
 
 ```bash
-sudo nano /etc/modules-load.d/audio.conf
-```
-
-```
+sudo tee /etc/modules-load.d/audio.conf <<EOF
 apr
 pdr_interface
 q6core
@@ -521,25 +740,33 @@ snd-soc-msm8916-analog
 snd-soc-msm8916-digital
 snd-soc-tfa989x
 snd-soc-apq8016-sbc
+EOF
 ```
 
 ### UCM configuration
 
-Check if Debian's `alsa-ucm-conf` package includes the `samsung-a2015` profile:
+Check if trixie's `alsa-ucm-conf` includes the `samsung-a2015` profile:
 
 ```bash
 ls /usr/share/alsa/ucm2/ | grep samsung
 ```
 
-If it is missing, copy the UCM files from pmaports as with the Arch guide. The msm8916-mainline project also maintains UCM configs at:
+If missing, copy the UCM files from pmaports onto the tablet:
 
+```bash
+# On your ThinkPad, copy from pmaports to the tablet over SCP
+scp -r ~/pmaports/... zuzu@192.168.7.1:~/ # check pmaports for UCM path
 ```
-https://github.com/msm8916-mainline/alsa-ucm-conf
+
+Or pull them from the msm8916-mainline alsa-ucm-conf repo:
+
+```bash
+git clone https://github.com/msm8916-mainline/alsa-ucm-conf.git
+# Copy the samsung-a2015, platforms/msm8916, codecs/msm8916-wcd directories
+# into /usr/share/alsa/ucm2/
 ```
 
 ### Verify audio
-
-After a full boot:
 
 ```bash
 cat /proc/asound/cards
@@ -551,30 +778,40 @@ speaker-test -D hw:0,2 -c 1 -t wav
 
 ---
 
-## Part 12 — Display and GPU
+## Part 12 — Sandboxing (the reason for switching from ALARM)
 
-Identical to the Arch guide. Freedreno FD307 works with hardware acceleration, no software rendering flags needed.
+Trixie ships stable, well-tested package versions. The pmaports kernel config already enables the kernel features required for sandboxing:
 
-Verify:
+```
+CONFIG_USER_NS=y
+CONFIG_SECCOMP=y
+CONFIG_SECCOMP_FILTER=y
+CONFIG_CGROUPS=y
+```
+
+If you still hit bubblewrap or Flatpak sandbox errors, check:
 
 ```bash
-glxinfo | grep renderer
-# renderer: FD307
+cat /proc/sys/kernel/unprivileged_userns_clone
+# Must be 1
+```
+
+If it is 0:
+
+```bash
+echo "kernel.unprivileged_userns_clone=1" | \
+  sudo tee /etc/sysctl.d/99-namespaces.conf
+sudo sysctl -p /etc/sysctl.d/99-namespaces.conf
 ```
 
 ---
 
 ## Part 13 — Touchscreen
 
-Identical to the Arch guide. The Zinitix driver is in-kernel and libinput picks it up automatically. No config needed in default portrait orientation.
-
-For display rotation:
+Works in default portrait orientation with no config. For display rotation:
 
 ```bash
-sudo nano /etc/X11/xorg.conf.d/99-display.conf
-```
-
-```
+sudo tee /etc/X11/xorg.conf.d/99-display.conf <<EOF
 Section "Monitor"
     Identifier "DSI-1"
     Option "Rotate" "right"
@@ -586,13 +823,12 @@ Section "InputClass"
     Driver "libinput"
     Option "TransformationMatrix" "0 1 0 -1 0 1 0 0 1"
 EndSection
+EOF
 ```
 
 ---
 
 ## Part 14 — Screen Brightness
-
-Identical to the Arch guide.
 
 ```bash
 echo 100 | sudo tee /sys/class/backlight/1a98000.dsi.0/brightness
@@ -601,103 +837,51 @@ echo 100 | sudo tee /sys/class/backlight/1a98000.dsi.0/brightness
 Allow your user to set it without sudo:
 
 ```bash
-sudo nano /etc/udev/rules.d/90-backlight.rules
-```
-
-```
+sudo tee /etc/udev/rules.d/90-backlight.rules <<EOF
 ACTION=="add", SUBSYSTEM=="backlight", \
   RUN+="/bin/chmod a+w /sys/class/backlight/%k/brightness"
-```
-
----
-
-## Debian-Specific Notes
-
-### Sandboxing
-
-The main reason to switch from ALARM. Debian bookworm ships conservative, well-tested package versions and its kernel configuration expectations (seccomp, user namespaces, cgroups) are better matched by the mainline kernel config from pmaports than ALARM's rolling setup. Flatpak, Chromium sandboxing, and bubblewrap should work without the namespace errors common on ALARM.
-
-If you still hit sandbox issues, check:
-
-```bash
-# Verify user namespaces are enabled
-cat /proc/sys/kernel/unprivileged_userns_clone
-# Should be 1; if 0:
-echo 1 | sudo tee /proc/sys/kernel/unprivileged_userns_clone
-
-# Make it permanent
-echo "kernel.unprivileged_userns_clone=1" | \
-  sudo tee /etc/sysctl.d/99-namespaces.conf
-```
-
-### Package management
-
-Standard apt. No AUR, no manual PKGBUILDs. Packages that required AUR on ALARM (like `rmtfs`) need building from source once, but everything else is just `apt install`.
-
-### Kernel updates
-
-Unlike ALARM which pushes kernel updates through pacman, on Debian **you manage the kernel yourself** — it is not in apt at all. When you want to update the kernel, repeat Part 5 of this guide (pull the new tag, build, copy to SD card, rebuild boot.img). This is actually an advantage for stability — the kernel only changes when you decide it does.
-
-### fstab
-
-Add proper entries so the filesystems mount correctly:
-
-```bash
-sudo nano /etc/fstab
-```
-
-```
-/dev/mmcblk1p2  /       ext4    defaults,noatime  0 1
-/dev/mmcblk1p1  /boot   ext4    defaults          0 2
+EOF
 ```
 
 ---
 
 ## Troubleshooting
 
-### `debootstrap` fails during second stage
+### `debootstrap` second stage fails with missing library errors
 
-Make sure `binfmt-support` is running and QEMU is registered:
-
-```bash
-sudo systemctl restart binfmt-support
-sudo update-binfmts --enable qemu-aarch64
-```
-
-Then retry:
+The first stage did not complete. Wipe and retry, using `http` not `https`:
 
 ```bash
-sudo chroot /mnt/root /debootstrap/debootstrap --second-stage
+sudo rm -rf /mnt/root/*
+sudo debootstrap --arch=arm64 --foreign trixie /mnt/root http://deb.debian.org/debian
 ```
 
-### LightDM does not start
+Watch for a clean end: the last line should be `I: Base system installed successfully.`
+
+### `dpkg-reconfigure` not found inside chroot
+
+Use the full path:
 
 ```bash
-journalctl -u lightdm --no-pager
+/usr/sbin/dpkg-reconfigure locales
 ```
 
-Common cause: missing `xserver-xorg-video-fbdev` or `xserver-xorg-video-modesetting`. Install both:
+### apt fails with certificate errors inside chroot
+
+Set the date first, then use http until `ca-certificates` is installed:
 
 ```bash
-sudo apt install -y xserver-xorg-video-modesetting xserver-xorg-video-fbdev
+date -s "2026-06-05 14:00:00"
+sed -i 's/https:/http:/g' /etc/apt/sources.list
+apt update
+apt install -y ca-certificates
+sed -i 's/http:/https:/g' /etc/apt/sources.list
+apt update
 ```
 
-### Sandboxing still broken after switching from ALARM
+### WiFi / audio / remoteproc not working
 
-Check unprivileged user namespaces as described above. Also verify the kernel was built with:
-
-```
-CONFIG_USER_NS=y
-CONFIG_SECCOMP=y
-CONFIG_SECCOMP_FILTER=y
-CONFIG_CGROUPS=y
-```
-
-These are all set in the pmaports config.
-
-### WiFi, audio, remoteproc issues
-
-All identical to the Arch guide troubleshooting section — these are hardware-level, not distro-level.
+All identical to the Arch guide troubleshooting — these are hardware-level issues, not distro-level. Refer to the Arch guide troubleshooting section.
 
 ### `rmtfs` build fails: `libqrtr-glib not found`
 
@@ -705,7 +889,7 @@ All identical to the Arch guide troubleshooting section — these are hardware-l
 sudo apt install -y libqrtr-glib-dev
 ```
 
-If not available in bookworm repos:
+If not in trixie repos, build it first:
 
 ```bash
 git clone https://gitlab.freedesktop.org/mobile-broadband/libqrtr-glib.git
@@ -713,30 +897,34 @@ cd libqrtr-glib
 meson setup build
 ninja -C build
 sudo ninja -C build install
+sudo ldconfig
 ```
 
 Then rebuild rmtfs.
 
+### Kernel updates
+
+The kernel is not managed by apt — update it manually by repeating Part 7 whenever you want a new version. This is intentional: the kernel only changes when you decide it does.
+
 ---
 
-## Boot Sequence Summary
+## Boot Sequence
 
 ```
 Power on
   → Samsung/Qualcomm bootloader
-  → lk2nd (internal eMMC boot partition)
-  → reads extlinux.conf from SD card /boot
-  → Linux 6.12.1-msm8916+ starts
+  → lk2nd
+  → Linux 7.1-msm8916+ starts
   → systemd
       → msm-firmware-loader.service
-            mounts apnhlos, modem, persist from internal eMMC
-            symlinks blobs into /run/msm-firmware-loader/target/
+            mounts apnhlos, modem, persist from internal eMMC (read-only)
+            symlinks all blobs into /run/msm-firmware-loader/target/
             sets firmware search path
       → remoteproc1 (WCNSS → wlan0)
-      → remoteproc0 (modem → audio DSP)
+      → remoteproc0 (modem → audio DSP path)
       → rmtfs.service
       → NetworkManager (WiFi connects)
-      → lightdm (Xorg on vt7)
+      → lightdm (Xorg)
             user logs in
             → icewm + onboard
 ```
@@ -745,8 +933,9 @@ Power on
 
 ## Resources
 
-- [msm8916-mainline project](https://github.com/msm8916-mainline) — kernel, lk2nd, msm-firmware-loader
-- [pmaports — linux-postmarketos-qcom-msm8916](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/master/device/testing/linux-postmarketos-qcom-msm8916) — kernel config
-- [Debian bookworm release notes](https://www.debian.org/releases/bookworm/)
+- [msm8916-mainline kernel](https://github.com/msm8916-mainline/linux)
+- [lk2nd](https://github.com/msm8916-mainline/lk2nd)
+- [pmaports — msm8916 kernel config](https://gitlab.postmarketos.org/postmarketOS/pmaports/-/tree/master/device/testing/linux-postmarketos-qcom-msm8916)
 - [rmtfs](https://github.com/andersson/rmtfs)
-- [Freedreno / Mesa docs](https://docs.mesa3d.org/drivers/freedreno.html)
+- [msm8916-mainline alsa-ucm-conf](https://github.com/msm8916-mainline/alsa-ucm-conf)
+- [Debian trixie](https://www.debian.org/releases/trixie/)
