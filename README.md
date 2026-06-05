@@ -13,8 +13,7 @@ Yes. I used ai. Use it wisely.
 - SM-P355 (tested)
 
 ## Theoretically Supported Devices
-- P350 (untested) 
-- P355 (untested)
+- P350 (untested)
 - T350 (untested)
 - T355 (untested)
 - SM-T357W (untested)
