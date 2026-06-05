@@ -11,13 +11,15 @@ Tested with my sm-p355 but it should work with P350 (Wi-Fi); P355 (3G/LTE) T350 
 Yes. I used ai. Use it wisely.
 
 ## Supported Devices
-- SM-P355 (3G/LTE)
-- P350 (Wi-Fi)
-- P355 (3G/LTE)
-- T350 (Wi-Fi)
-- T355 (3G/LTE)
-- SM-T357W
-- SM-T357Y
+- SM-P355 (tested)
+
+#Theoritically Supported Devices
+- P350 (untested) 
+- P355 (untested)
+- T350 (untested)
+- T355 (untested)
+- SM-T357W (untested)
+- SM-T357Y (untested)
 
 ## Guide
 [Installation Guide](debian-bookworm-sm-p355-port-guide.md) - Complete step-by-step guide for installing Debian Bookworm on Samsung Galaxy Tab A 8.0 (SM-P355)
