@@ -20,4 +20,4 @@ Yes. I used ai. Use it wisely.
 - SM-T357Y
 
 ## Guide
-[Link to Installation Guide](#) - *https://github.com/zuzuka17/Debian-Trixie-with-the-msm8916-mainline-kernel-for-samsung-gt58/blob/main/debian-bookworm-sm-p355-port-guide.md*
+[Link to Installation Guide](#https://github.com/zuzuka17/Debian-Trixie-with-the-msm8916-mainline-kernel-for-samsung-gt58/blob/main/debian-bookworm-sm-p355-port-guide.md) 
