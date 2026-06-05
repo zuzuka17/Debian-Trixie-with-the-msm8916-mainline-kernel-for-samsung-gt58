@@ -20,4 +20,4 @@ Yes. I used ai. Use it wisely.
 - SM-T357Y
 
 ## Guide
-[Link to Installation Guide](#https://github.com/zuzuka17/Debian-Trixie-with-the-msm8916-mainline-kernel-for-samsung-gt58/blob/main/debian-bookworm-sm-p355-port-guide.md) 
+[Installation Guide](debian-bookworm-sm-p355-port-guide.md) - Complete step-by-step guide for installing Debian Bookworm on Samsung Galaxy Tab A 8.0 (SM-P355)
