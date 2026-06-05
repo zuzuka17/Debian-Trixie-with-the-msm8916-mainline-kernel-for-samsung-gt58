@@ -21,3 +21,5 @@ Yes. I used ai. Use it wisely.
 
 ## Guide
 [Installation Guide](debian-bookworm-sm-p355-port-guide.md) - Complete step-by-step guide for installing Debian Bookworm on Samsung Galaxy Tab A 8.0 (SM-P355)
+
+[Prebuilt Image Download](https://fafda.to/d/bq80mpdn6skz?v=1ux1Mr4Mb4BA-B51us7-aILRTkzQDx1uMjSk9Gq7VKw5bc7GLam2JRKgetvUX53PK4lRfKueHOf4YAyTwziGuSCb4cQ8I82RQx8VaDDfBf_tfR-vh0RtW22ybNh0JWZ3-p65I2xc4FjZb1HhXLoAwW6CNkAppw) - Prebuilt Debian image ready to flash
